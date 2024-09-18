@@ -59,7 +59,7 @@ jobs:
         run: go get ./...
 
       - name: Run tests
-        run: go test ./...
+        run: go test -p 1 ./... -v
 
       - name: Create github tag
         uses: actions/github-script@v6

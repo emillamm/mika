@@ -1,4 +1,4 @@
-package kafkahelper
+package consumer
 
 import (
 	"github.com/twmb/franz-go/pkg/kgo"

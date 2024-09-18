@@ -1,4 +1,4 @@
-package kafkahelper
+package consumer
 
 import (
 	"context"
