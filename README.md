@@ -10,6 +10,11 @@ MiKa offers the following functionality out of the box
 * **Graceful shutdown**: The client can be shut down gracefully to allow already polled records to finish processing within a configurable timeframe.
 
 ## Usage
+### Installation
+```
+go get github.com/emillamm/mika
+```
+
 ### Initialize and configure the client
 The client is created by calling `NewKafkaClient(ctx, env)` which takes a context and function of the signature `func(string)string` to get environment configuration. If the context expires, the client will be closed which can be useful in tests. See section Environment configuration about which environment variables can be used to configure the client. 
 
