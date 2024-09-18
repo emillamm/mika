@@ -1,10 +1,10 @@
-package kafka
+package mika
 
 import (
 	"context"
 	"fmt"
 	"github.com/emillamm/envx"
-	"github.com/emillamm/goext/kafkahelper"
+	consum "github.com/emillamm/mika/consumer"
 	"github.com/twmb/franz-go/pkg/kgo"
 	"sync"
 	"errors"
@@ -14,18 +14,18 @@ import (
 
 var ErrClientClosed = errors.New("KafkaClient is closed")
 
-// Exported types from kafkahelper module
-var ErrConsumerTopicAlreadyExists = kafkahelper.ErrConsumerTopicAlreadyExists
-var ErrConsumerTopicDoesntExist = kafkahelper.ErrConsumerTopicDoesntExist
+// Exported types from consumer module
+var ErrConsumerTopicAlreadyExists = consum.ErrConsumerTopicAlreadyExists
+var ErrConsumerTopicDoesntExist = consum.ErrConsumerTopicDoesntExist
 var ErrDqlNotConfigured = errors.New("This client was not configured to comsume from dlq")
 var ErrRetriedRecordWithoutConsumer = errors.New("This client does not have a consumer for a record consumed from a retry/dlq topic. This should not happen.")
 var ErrRetriedRecordFromDifferentGroup = errors.New("This client group is different from the original client group that published to a retry/dlq topic")
-type ConsumeRecord = kafkahelper.ConsumeRecord
+type ConsumeRecord = consum.ConsumeRecord
 
 
 type KafkaClient struct {
-	consumerRegistry *kafkahelper.ConsumerRegistry
-	consumerStatus *kafkahelper.ConsumerStatus
+	consumerRegistry *consum.ConsumerRegistry
+	consumerStatus *consum.ConsumerStatus
 	// error channel - this is never closed after the client is created
 	errs chan error
 	underlying *kgo.Client
@@ -50,8 +50,8 @@ func NewKafkaClient(ctx context.Context, env envx.EnvX) (client *KafkaClient, er
 	}
 
 	client = &KafkaClient{
-		consumerRegistry: kafkahelper.NewConsumerRegistry(),
-		consumerStatus: kafkahelper.NewConsumerStatus(),
+		consumerRegistry: consum.NewConsumerRegistry(),
+		consumerStatus: consum.NewConsumerStatus(),
 		errs: make(chan error),
 		startedChan: make(chan struct{}),
 		doneChan: make(chan struct{}),
@@ -475,7 +475,7 @@ func (k *KafkaClient) pollProcessCommit() {
 			})
 		}
 
-		consumer.Process(kafkahelper.NewConsumeRecord(record, ack, fail))
+		consumer.Process(consum.NewConsumeRecord(record, ack, fail))
 	})
 	wg.Wait()
 
@@ -487,7 +487,7 @@ func (k *KafkaClient) pollProcessCommit() {
 	}
 }
 
-func (k *KafkaClient) getConsumerForRecord(record *kgo.Record, getHeaders func()*Headers) (consumer *kafkahelper.RegisteredConsumer, err error) {
+func (k *KafkaClient) getConsumerForRecord(record *kgo.Record, getHeaders func()*Headers) (consumer *consum.RegisteredConsumer, err error) {
 	consumer, err = k.consumerRegistry.GetConsumer(record.Topic)
 	// if consumer doesn't exist for topic, try getting consumer from FAILURE_TOPIC, if present.
 	// This will find the right consumer if the record came from a retry/dlq topic.
