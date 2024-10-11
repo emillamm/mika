@@ -338,8 +338,7 @@ func (k *KafkaClient) WaitForDone() {
 // If the value is not present, default to the .AtCommitted() offset, or auto.offset.reset "none"
 // in Kafka. Given this configuration, new consumer groups will fail if the value is not present.
 func getConsumerStartOffset(env envx.EnvX) (kgo.Offset, error) {
-	var err error
-	startFrom := env.AsTime(time.RFC3339).Getenv("KAFKA_CONSUMER_START_FROM", envx.Intercept[time.Time](&err))
+	startFrom, err := env.Time("KAFKA_CONSUMER_START_FROM", time.RFC3339).Value()
 	if err != nil {
 		if errors.Is(err, envx.ErrEmptyValue) {
 			return kgo.NewOffset().AtCommitted(), nil
