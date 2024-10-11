@@ -1,7 +1,7 @@
 github.com/deckarep/golang-set/v2 v2.6.0 h1:XfcQbWM1LlMB8BsJ8N9vW5ehnnPVIw0je80NsVHagjM=
 github.com/deckarep/golang-set/v2 v2.6.0/go.mod h1:VAky9rY/yGXJOLEDv3OMci+7wtDpOF4IN+y82NBOac4=
-github.com/emillamm/envx v0.1.8 h1:XrR1G6bWoL6JkhlT8o+DOAPMHVTab5l7LmeQJpJaflQ=
-github.com/emillamm/envx v0.1.8/go.mod h1:oBeIVATgr0HXNunxkInv2PRnnDCpN7r0sF68z8lf/5Y=
+github.com/emillamm/envx v0.1.13 h1:8i4mRqM5WN0E1RCEq9ykS+uh2P4ewq3mi01RqsJo9d8=
+github.com/emillamm/envx v0.1.13/go.mod h1:oBeIVATgr0HXNunxkInv2PRnnDCpN7r0sF68z8lf/5Y=
 github.com/klauspost/compress v1.17.8 h1:YcnTYrq7MikUT7k0Yb5eceMmALQPYBW/Xltxn0NAMnU=
 github.com/klauspost/compress v1.17.8/go.mod h1:Di0epgTjJY877eYKx5yC51cX2A2Vl2ibi7bDH9ttBbw=
 github.com/pierrec/lz4/v4 v4.1.21 h1:yOVMLb6qSIDP67pl/5F7RepeKYu/VmTyEXvuMI5d9mQ=

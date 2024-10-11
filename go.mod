@@ -6,7 +6,7 @@ toolchain go1.23.1
 
 require (
 	github.com/deckarep/golang-set/v2 v2.6.0
-	github.com/emillamm/envx v0.1.8
+	github.com/emillamm/envx v0.1.13
 	github.com/twmb/franz-go v1.17.1
 )
 
