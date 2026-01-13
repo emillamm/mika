@@ -1,0 +1,14 @@
+version: "0.5"
+
+processes:
+  kafka:
+    command: ./scripts/kafka-start.sh
+    readiness_probe:
+      exec:
+        command: kafka-broker-api-versions.sh --bootstrap-server localhost:29092
+      initial_delay_seconds: 5
+      period_seconds: 5
+      timeout_seconds: 5
+      failure_threshold: 10
+    availability:
+      restart: on_failure
