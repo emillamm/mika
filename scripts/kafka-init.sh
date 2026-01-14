@@ -1,15 +1,14 @@
 #!/usr/bin/env bash
 set -ex
 
-PROJECT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-KAFKA_DATA_DIR="$PROJECT_ROOT/.devbox/kafka-data"
+KAFKA_DATA_DIR="$DEVBOX_PROJECT_ROOT/.devbox/kafka-data"
 KAFKA_CONFIG="$KAFKA_DATA_DIR/server.properties"
 CLUSTER_ID_FILE="$KAFKA_DATA_DIR/cluster_id"
 
 mkdir -p "$KAFKA_DATA_DIR"
 
 # Generate runtime config with actual paths
-sed "s|__KAFKA_DATA_DIR__|$KAFKA_DATA_DIR|g" "$PROJECT_ROOT/kafka.properties" > "$KAFKA_CONFIG"
+sed "s|__KAFKA_DATA_DIR__|$KAFKA_DATA_DIR|g" "$DEVBOX_PROJECT_ROOT/kafka.properties" > "$KAFKA_CONFIG"
 
 # Generate cluster ID if it doesn't exist
 if [ ! -f "$CLUSTER_ID_FILE" ]; then
