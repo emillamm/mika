@@ -1,7 +1,7 @@
 {
   "lockfile_version": "1",
   "packages": {
-    "apacheKafka@latest": {
+    "apacheKafka@2.13-4.1.1": {
       "last_modified": "2026-01-09T13:41:53Z",
       "resolved": "github:NixOS/nixpkgs/5f02c91314c8ba4afe83b256b023756412218535#apacheKafka",
       "source": "devbox-search",
