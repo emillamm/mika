@@ -1,0 +1,1 @@
+./cuefig/generate/actions.sh

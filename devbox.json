@@ -1,0 +1,26 @@
+{
+  "$schema": "https://raw.githubusercontent.com/jetify-com/devbox/0.16.0/.schema/devbox.schema.json",
+  "packages": {
+    "go": "1.25.1",
+    "cue": "0.15.1",
+    "apacheKafka": "2.13-4.1.1"
+  },
+  "env": {
+    "CUE_REGISTRY": "github.com/konfekt-app/konfekt-cuefig=ghcr.io/konfekt-app,github.com/emillamm/cuefig=ghcr.io/emillamm,registry.cue.works"
+  },
+  "shell": {
+    "scripts": {
+      "init": "./scripts/kafka-init.sh",
+      "test": "go test ./... -v",
+      "ci": [
+	"devbox run init",
+        "devbox services start kafka",
+	"devbox run test"
+      ],
+      "cue-deps": [
+	"cue mod get github.com/emillamm/cuefig@v0"
+      ],
+      "cue-gen": "./cuefig/generate/generate.sh"
+    }
+  }
+}

@@ -1,0 +1,95 @@
+name: Publish
+"on":
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - '**/*.md'
+      - manifests/**
+      - .release
+jobs:
+  publish:
+    permissions:
+      contents: write
+      packages: read
+    runs-on: ubuntu-latest
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - id: checkout
+        uses: actions/checkout@v6
+      - id: get-token
+        name: Get github app access token
+        uses: getsentry/action-github-app-token@v3
+        with:
+          app_id: ${{ secrets.REPO_READ_APP_ID }}
+          private_key: ${{ secrets.REPO_READ_TOKEN }}
+        env:
+          OPENSSL_CONF: /dev/null
+      - name: Configure github app access token
+        run: git config --global url."https://x-access-token:${{ steps.get-token.outputs.token }}@github.com/".insteadOf "https://github.com/"
+      - name: Install Devbox and environment
+        uses: emillamm/devbox-install-action@restore-cache-key-v0.13.0
+        with:
+          enable-cache: "true"
+      - name: Cache Go modules
+        uses: actions/cache@v4
+        with:
+          path: /home/runner/go/pkg/mod
+          key: go-cache-${{ runner.os }}-${{ hashFiles('go.sum') }}
+          restore-keys: |-
+            go-mod-cache-${{ runner.os }}-
+            go-mod-cache-
+      - name: Cache Go internal cache (to speed up tests)
+        uses: actions/cache@v4
+        with:
+          path: /home/runner/.cache/go-build
+          key: go-cache-${{ runner.os }}-${{ hashFiles('**/*.go', 'go.sum') }}
+          restore-keys: |-
+            go-cache-${{ runner.os }}-
+            go-cache-
+      - name: Login to Artifact Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Verify that cue-generated files are up to date
+        run: |-
+          before=$(git status --porcelain)
+          devbox run cue-gen
+          after=$(git status --porcelain)
+          if [ "$before" != "$after" ]; then
+            echo "Error: 'devbox run cue-gen' produced new uncommitted changes:"
+            echo "Before:"
+            echo "$before"
+            echo "After:"
+            echo "$after"
+            exit 1
+          fi
+        env:
+          GH_TOKEN: ${{ steps.get-token.outputs.token }}
+      - id: get-version
+        name: Compute next version based on previous tag in commit history
+        uses: ietf-tools/semver-action@v1
+        with:
+          token: ${{ github.token }}
+          branch: main
+          noVersionBumpBehavior: patch
+      - id: get-sha7
+        name: Compute sha7 which will be used for tagging the image as "x.y.z-sha7"
+        run: echo "sha7=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+      - name: Run devbox CI task
+        run: devbox run ci
+        env:
+          GH_TOKEN: ${{ steps.get-token.outputs.token }}
+      - name: Create tag
+        uses: actions/github-script@v8
+        with:
+          script: |-
+            github.rest.git.createRef({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              ref: "refs/tags/${{ steps.get-version.outputs.nextStrict }}",
+              sha: context.sha
+            })
