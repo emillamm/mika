@@ -13,21 +13,9 @@ jobs:
       contents: write
       packages: read
     runs-on: ubuntu-latest
-  test:
-    runs-on: ubuntu-latest
     steps:
       - id: checkout
         uses: actions/checkout@v6
-      - id: get-token
-        name: Get github app access token
-        uses: getsentry/action-github-app-token@v3
-        with:
-          app_id: ${{ secrets.REPO_READ_APP_ID }}
-          private_key: ${{ secrets.REPO_READ_TOKEN }}
-        env:
-          OPENSSL_CONF: /dev/null
-      - name: Configure github app access token
-        run: git config --global url."https://x-access-token:${{ steps.get-token.outputs.token }}@github.com/".insteadOf "https://github.com/"
       - name: Install Devbox and environment
         uses: emillamm/devbox-install-action@restore-cache-key-v0.13.0
         with:
@@ -67,8 +55,6 @@ jobs:
             echo "$after"
             exit 1
           fi
-        env:
-          GH_TOKEN: ${{ steps.get-token.outputs.token }}
       - id: get-version
         name: Compute next version based on previous tag in commit history
         uses: ietf-tools/semver-action@v1
@@ -81,8 +67,6 @@ jobs:
         run: echo "sha7=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
       - name: Run devbox CI task
         run: devbox run ci
-        env:
-          GH_TOKEN: ${{ steps.get-token.outputs.token }}
       - name: Create tag
         uses: actions/github-script@v8
         with:
@@ -90,6 +74,6 @@ jobs:
             github.rest.git.createRef({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              ref: "refs/tags/${{ steps.get-version.outputs.nextStrict }}",
+              ref: "refs/tags/v${{ steps.get-version.outputs.nextStrict }}",
               sha: context.sha
             })

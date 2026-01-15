@@ -10,6 +10,6 @@ deps: {
 		v: "v0.6.0"
 	}
 	"github.com/emillamm/cuefig@v0": {
-		v: "v0.0.22"
+		v: "v0.0.25"
 	}
 }

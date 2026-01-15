@@ -20,16 +20,6 @@ jobs:
     steps:
       - id: checkout
         uses: actions/checkout@v6
-      - id: get-token
-        name: Get github app access token
-        uses: getsentry/action-github-app-token@v3
-        with:
-          app_id: ${{ secrets.REPO_READ_APP_ID }}
-          private_key: ${{ secrets.REPO_READ_TOKEN }}
-        env:
-          OPENSSL_CONF: /dev/null
-      - name: Configure github app access token
-        run: git config --global url."https://x-access-token:${{ steps.get-token.outputs.token }}@github.com/".insteadOf "https://github.com/"
       - name: Install Devbox and environment
         uses: emillamm/devbox-install-action@restore-cache-key-v0.13.0
         with:
@@ -69,9 +59,5 @@ jobs:
             echo "$after"
             exit 1
           fi
-        env:
-          GH_TOKEN: ${{ steps.get-token.outputs.token }}
       - name: Run devbox CI task
         run: devbox run ci
-        env:
-          GH_TOKEN: ${{ steps.get-token.outputs.token }}

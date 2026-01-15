@@ -4,5 +4,5 @@ _wf: workflows & {
 	#steps: cue: #Registries: ["github.com/emillamm/cuefig=ghcr.io/emillamm"]
 }
 
-actions: publish: _wf.go.#PublishLibrary
-actions: test:    _wf.go.#Test
+actions: publish: _wf.go.#PublishLibraryPublic
+actions: test:    _wf.go.#TestPublic
