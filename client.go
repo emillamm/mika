@@ -2,47 +2,50 @@ package mika
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"sync"
+	"time"
+
+	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/emillamm/envx"
+	"github.com/emillamm/mika/consumer"
 	consum "github.com/emillamm/mika/consumer"
 	"github.com/twmb/franz-go/pkg/kgo"
-	"sync"
-	"errors"
-	"time"
-	mapset "github.com/deckarep/golang-set/v2"
 )
 
 var ErrClientClosed = errors.New("KafkaClient is closed")
 
 // Exported types from consumer module
-var ErrConsumerTopicAlreadyExists = consum.ErrConsumerTopicAlreadyExists
-var ErrConsumerTopicDoesntExist = consum.ErrConsumerTopicDoesntExist
-var ErrDqlNotConfigured = errors.New("This client was not configured to comsume from dlq")
-var ErrRetriedRecordWithoutConsumer = errors.New("This client does not have a consumer for a record consumed from a retry/dlq topic. This should not happen.")
-var ErrRetriedRecordFromDifferentGroup = errors.New("This client group is different from the original client group that published to a retry/dlq topic")
-type ConsumeRecord = consum.ConsumeRecord
+var (
+	ErrConsumerTopicAlreadyExists      = consum.ErrConsumerTopicAlreadyExists
+	ErrConsumerTopicDoesntExist        = consum.ErrConsumerTopicDoesntExist
+	ErrDqlNotConfigured                = errors.New("This client was not configured to comsume from dlq")
+	ErrRetriedRecordWithoutConsumer    = errors.New("This client does not have a consumer for a record consumed from a retry/dlq topic. This should not happen.")
+	ErrRetriedRecordFromDifferentGroup = errors.New("This client group is different from the original client group that published to a retry/dlq topic")
+)
 
+type ConsumeRecord = consum.ConsumeRecord
 
 type KafkaClient struct {
 	consumerRegistry *consum.ConsumerRegistry
-	consumerStatus *consum.ConsumerStatus
+	consumerStatus   *consum.ConsumerStatus
 	// error channel - this is never closed after the client is created
-	errs chan error
-	underlying *kgo.Client
-	group string
-	retryTopic string
-	dlqTopic string
-	startedChan chan struct{}
-	doneChan chan struct{}
+	errs         chan error
+	underlying   *kgo.Client
+	group        string
+	retryTopic   string
+	dlqTopic     string
+	startedChan  chan struct{}
+	doneChan     chan struct{}
 	doneWaitChan chan struct{}
-	startOffset kgo.Offset
+	startOffset  kgo.Offset
 }
 
 // Create a new kafka client that will shutdown (not gracefully) if the context expires.
 // In order to shutdown gracefully, i.e. finish processing and committing fetched records,
 // call client.CloseGracefully(ctx) with a context that dictates the graceful shutdown period.
 func NewKafkaClient(ctx context.Context, env envx.EnvX) (client *KafkaClient, err error) {
-
 	// Initialize offset based on value of "KAFKA_CONSUMER_START_FROM"
 	startOffset, err := getConsumerStartOffset(env)
 	if err != nil {
@@ -51,12 +54,12 @@ func NewKafkaClient(ctx context.Context, env envx.EnvX) (client *KafkaClient, er
 
 	client = &KafkaClient{
 		consumerRegistry: consum.NewConsumerRegistry(),
-		consumerStatus: consum.NewConsumerStatus(),
-		errs: make(chan error),
-		startedChan: make(chan struct{}),
-		doneChan: make(chan struct{}),
-		doneWaitChan: make(chan struct{}),
-		startOffset: startOffset,
+		consumerStatus:   consum.NewConsumerStatus(),
+		errs:             make(chan error),
+		startedChan:      make(chan struct{}),
+		doneChan:         make(chan struct{}),
+		doneWaitChan:     make(chan struct{}),
+		startOffset:      startOffset,
 	}
 
 	// async shutdown
@@ -82,7 +85,7 @@ func NewKafkaClient(ctx context.Context, env envx.EnvX) (client *KafkaClient, er
 // Register a topic and consumer. If a topic already exists in the registry, returns ErrConsumerTopicAlreadyExists,
 // otherwise returns nil. Consumers must be registered before the client is started, otherwise it panics.
 // A consumer is enabled by default when registered.
-func (k *KafkaClient) RegisterConsumer(
+func (k *KafkaClient) RegisterConsumerFunc(
 	topic string,
 	retries int,
 	useDlq bool,
@@ -97,6 +100,11 @@ func (k *KafkaClient) RegisterConsumer(
 		useDlq,
 		process,
 	)
+}
+
+// See RegisterConsumerFunc for behavior.
+func (k *KafkaClient) RegisterConsumer(c consumer.Consumer) error {
+	return k.RegisterConsumerFunc(c.Topic(), c.Retries(), c.UseDlq(), c.Consume)
 }
 
 // Set client consumer group. This must be called before client is started otherwise it will panic.
@@ -145,10 +153,9 @@ func (k *KafkaClient) SetDlqTopic(topic string) {
 // The returned error channel is unbuffered and needs to have a listener for the full lifecycle of the client.
 // Otherwise, the client will block when trying to push errors onto the channel.
 func (k *KafkaClient) Start() (errs <-chan error) {
-
 	errs = k.errs
 
-	if (k.IsStarted()) {
+	if k.IsStarted() {
 		return
 	}
 
@@ -163,7 +170,9 @@ func (k *KafkaClient) Start() (errs <-chan error) {
 
 	// add retry topic for consumption and verify that group is set
 	if k.retryTopic != "" {
-		if k.group == "" { panic("a consumer group must be set on the client if retries are enabled") }
+		if k.group == "" {
+			panic("a consumer group must be set on the client if retries are enabled")
+		}
 		consumeTopics = append(consumeTopics, k.retryTopic)
 	}
 
@@ -180,7 +189,6 @@ func (k *KafkaClient) Start() (errs <-chan error) {
 		return
 	}
 	k.underlying = underlying
-
 
 	// Start consuming regardless if there are any registered enabled consumer topics.
 	// If not, it will not poll.
@@ -221,14 +229,14 @@ func (k *KafkaClient) SyncConsumerTopics() error {
 	if !k.IsStarted() {
 		return nil
 	}
-	currentPausedTopics := k.underlying.PauseFetchTopics() // no args returns all paused topics
+	currentPausedTopics := k.underlying.PauseFetchTopics()  // no args returns all paused topics
 	currentConsumeTopics := k.underlying.GetConsumeTopics() // no args returns all paused topics
 	allTopics := mapset.NewSet[string](k.consumerRegistry.ConsumerTopics()...)
 	enabledTopics := mapset.NewSet[string](k.consumerRegistry.EnabledConsumerTopics()...)
 	pausedTopics := mapset.NewSet[string](currentPausedTopics...)
 	consumeTopics := mapset.NewSet[string](currentConsumeTopics...)
-	topicsToPause := allTopics.Difference(enabledTopics).Difference(pausedTopics) // Topics that are not enabled and not paused
-	topicsToResume := enabledTopics.Intersect(pausedTopics) // Topics that are enabled and paused
+	topicsToPause := allTopics.Difference(enabledTopics).Difference(pausedTopics)   // Topics that are not enabled and not paused
+	topicsToResume := enabledTopics.Intersect(pausedTopics)                         // Topics that are enabled and paused
 	topicsToAdd := enabledTopics.Difference(pausedTopics).Difference(consumeTopics) // Topics that are enabled and not paused and not being consumed
 	k.underlying.PauseFetchTopics(topicsToPause.ToSlice()...)
 	k.underlying.AddConsumeTopics(topicsToAdd.ToSlice()...)
@@ -353,7 +361,6 @@ func getConsumerStartOffset(env envx.EnvX) (kgo.Offset, error) {
 // Calling this if the client is already consuming, will not have an effect.
 // Calling this if the client is closed, will not have an effect.
 func (k *KafkaClient) startConsuming() {
-
 	if k.IsClosed() || k.consumerStatus.IsConsuming() {
 		return
 	}
@@ -387,7 +394,6 @@ func (k *KafkaClient) startPollProcessCommitLoop() {
 }
 
 func (k *KafkaClient) pollProcessCommit() {
-
 	// Create a context that can be passed to kgo.Client.PollFetches
 	// and will be cancelled if the consumer is terminated (gracefully or not).
 	// Put this in a go routine that will end once the polling finishes.
@@ -433,7 +439,7 @@ func (k *KafkaClient) pollProcessCommit() {
 		// get consumer handler from topic
 		consumer, err := k.getConsumerForRecord(record, getHeaders)
 		if err != nil {
-			// If this record came from a retry/dlq topic and the client doesn't have a consumer registered for 
+			// If this record came from a retry/dlq topic and the client doesn't have a consumer registered for
 			// this type of record (per the FAILURE_TOPIC header), it means that something is wrong and we should
 			// not call wg.Done()
 			if errors.Is(err, ErrRetriedRecordWithoutConsumer) {
@@ -486,7 +492,7 @@ func (k *KafkaClient) pollProcessCommit() {
 	}
 }
 
-func (k *KafkaClient) getConsumerForRecord(record *kgo.Record, getHeaders func()*Headers) (consumer *consum.RegisteredConsumer, err error) {
+func (k *KafkaClient) getConsumerForRecord(record *kgo.Record, getHeaders func() *Headers) (consumer *consum.RegisteredConsumer, err error) {
 	consumer, err = k.consumerRegistry.GetConsumer(record.Topic)
 	// if consumer doesn't exist for topic, try getting consumer from FAILURE_TOPIC, if present.
 	// This will find the right consumer if the record came from a retry/dlq topic.
@@ -514,8 +520,7 @@ func (k *KafkaClient) isFromRetryOrDlq(record *kgo.Record) bool {
 	return (k.retryTopic != "" && record.Topic == k.retryTopic) || (k.dlqTopic != "" && record.Topic == k.dlqTopic)
 }
 
-func (k *KafkaClient) handleFailedRecord(record *kgo.Record, failureReason error, getHeaders func()*Headers) error {
-
+func (k *KafkaClient) handleFailedRecord(record *kgo.Record, failureReason error, getHeaders func() *Headers) error {
 	// Short-circuit if group is not defined.
 	// Without a group, we cannot associate the failure headers with a consumer group.
 	// We do not want to rely on a global record failure state because multiple consumers can share
@@ -528,21 +533,21 @@ func (k *KafkaClient) handleFailedRecord(record *kgo.Record, failureReason error
 		)
 	}
 
-
 	headers := getHeaders()
 	failureState, err := InitFailureHeaders(headers, k.group, failureReason)
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 
 	consumer, err := k.consumerRegistry.GetConsumer(failureState.OriginalTopic)
 	if err != nil {
 		return fmt.Errorf("could not get consumer for topic %s: %w", failureState.OriginalTopic, err)
 	}
 
-
 	// publish to retry topic if one exists and there are retries left
 	retriesEnabled := k.retryTopic != "" && consumer.Retries > 0
 	if retriesEnabled && consumer.Retries > failureState.Retries {
-		ctx, _ := context.WithTimeout(context.Background(), 5 * time.Second) // TODO make configurable
+		ctx, _ := context.WithTimeout(context.Background(), 5*time.Second) // TODO make configurable
 		failureState.IncrementRetries(headers, k.group)
 		retryRecord := *record
 		retryRecord.Topic = k.retryTopic
@@ -553,7 +558,7 @@ func (k *KafkaClient) handleFailedRecord(record *kgo.Record, failureReason error
 	}
 	dlqEnabled := k.dlqTopic != "" && k.group != "" && consumer.UseDlq
 	if dlqEnabled {
-		ctx, _ := context.WithTimeout(context.Background(), 5 * time.Second) // TODO make configurable
+		ctx, _ := context.WithTimeout(context.Background(), 5*time.Second) // TODO make configurable
 		dlqRecord := *record
 		dlqRecord.Topic = k.dlqTopic
 		if err := k.PublishRecord(ctx, k.dlqTopic, &dlqRecord); err != nil {
@@ -563,4 +568,3 @@ func (k *KafkaClient) handleFailedRecord(record *kgo.Record, failureReason error
 	}
 	return fmt.Errorf("dlq not enabled for topic %s. Record failed with error: %s", record.Topic, failureReason)
 }
-

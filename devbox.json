@@ -6,7 +6,7 @@
     "apacheKafka": "2.13-4.1.1"
   },
   "env": {
-    "CUE_REGISTRY": "github.com/konfekt-app/konfekt-cuefig=ghcr.io/konfekt-app,github.com/emillamm/cuefig=ghcr.io/emillamm,registry.cue.works"
+    "CUE_REGISTRY": "github.com/emillamm/cuefig=ghcr.io/emillamm,registry.cue.works"
   },
   "shell": {
     "scripts": {
