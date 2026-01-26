@@ -84,3 +84,37 @@ ctx, _ := context.WithTimeout(context.Background(), 15 * time.Second)
 client.CloseGracefully(ctx) // non-blocking
 client.WaitForDone() // blocks until the client is fully closed
 ```
+
+## Environment Configuration
+
+MiKa uses environment variables for connection and consumer settings.
+
+### Connection Settings
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `KAFKA_BROKERS` | Comma-separated list of broker addresses | `localhost:29092` |
+| `KAFKA_TLS_ENABLED` | Enable TLS encryption | `false` |
+| `KAFKA_SASL_MECHANISM` | SASL mechanism: `PLAIN`, `SCRAM-SHA-256`, `SCRAM-SHA-512` | (none) |
+| `KAFKA_SASL_USERNAME` | SASL username (required when mechanism is set) | |
+| `KAFKA_SASL_PASSWORD` | SASL password (required when mechanism is set) | |
+
+### Consumer Settings
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `KAFKA_CONSUMER_START_FROM` | RFC3339 timestamp for initial offset (new consumer groups only) | (none) |
+
+### Connecting to Confluent Cloud
+
+To connect to a Confluent Cloud cluster, set the following environment variables:
+
+```bash
+export KAFKA_BROKERS="pkc-xxxxx.region.cloud.confluent.cloud:9092"
+export KAFKA_TLS_ENABLED=true
+export KAFKA_SASL_MECHANISM=PLAIN
+export KAFKA_SASL_USERNAME="<API_KEY>"
+export KAFKA_SASL_PASSWORD="<API_SECRET>"
+```
+
+The API key and secret can be generated from the Confluent Cloud Console under your cluster's API keys section.
