@@ -40,6 +40,7 @@ type KafkaClient struct {
 	doneChan     chan struct{}
 	doneWaitChan chan struct{}
 	startOffset  kgo.Offset
+	env          envx.EnvX
 }
 
 // Create a new kafka client that will shutdown (not gracefully) if the context expires.
@@ -60,6 +61,7 @@ func NewKafkaClient(ctx context.Context, env envx.EnvX) (client *KafkaClient, er
 		doneChan:         make(chan struct{}),
 		doneWaitChan:     make(chan struct{}),
 		startOffset:      startOffset,
+		env:              env,
 	}
 
 	// async shutdown
@@ -182,7 +184,7 @@ func (k *KafkaClient) Start() (errs <-chan error) {
 	}
 
 	// create underlying *kgo.Client
-	underlying, err := LoadKgoClient(consumeTopics, k.group, k.startOffset)
+	underlying, err := LoadKgoClient(k.env, consumeTopics, k.group, k.startOffset)
 	if err != nil {
 		k.errs <- fmt.Errorf("failed to initialize *kgo.Client with error: %w", err)
 		k.Close()
