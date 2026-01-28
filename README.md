@@ -104,6 +104,9 @@ MiKa uses environment variables for connection and consumer settings.
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `KAFKA_CONSUMER_START_FROM` | RFC3339 timestamp for initial offset (new consumer groups only) | (none) |
+| `KAFKA_GLOBAL_SUFFIX` | Suffix appended to all consumer groups and topics (including retry/DLQ) | (none) |
+
+The `KAFKA_GLOBAL_SUFFIX` is useful for isolating consumer groups and topics in shared Kafka clusters, such as local development or testing environments. For example, setting `KAFKA_GLOBAL_SUFFIX=-dev` would transform `my-group` to `my-group-dev` and `my-topic` to `my-topic-dev`.
 
 ### Connecting to Confluent Cloud
 
