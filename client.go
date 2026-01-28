@@ -41,6 +41,7 @@ type KafkaClient struct {
 	doneWaitChan chan struct{}
 	startOffset  kgo.Offset
 	env          envx.EnvX
+	globalSuffix string
 }
 
 // Create a new kafka client that will shutdown (not gracefully) if the context expires.
@@ -53,6 +54,12 @@ func NewKafkaClient(ctx context.Context, env envx.EnvX) (client *KafkaClient, er
 		return nil, err
 	}
 
+	// Read global suffix from environment
+	globalSuffix, err := env.String("KAFKA_GLOBAL_SUFFIX").Default("")
+	if err != nil {
+		return nil, fmt.Errorf("failed to read KAFKA_GLOBAL_SUFFIX: %w", err)
+	}
+
 	client = &KafkaClient{
 		consumerRegistry: consum.NewConsumerRegistry(),
 		consumerStatus:   consum.NewConsumerStatus(),
@@ -62,6 +69,7 @@ func NewKafkaClient(ctx context.Context, env envx.EnvX) (client *KafkaClient, er
 		doneWaitChan:     make(chan struct{}),
 		startOffset:      startOffset,
 		env:              env,
+		globalSuffix:     globalSuffix,
 	}
 
 	// async shutdown
@@ -74,8 +82,10 @@ func NewKafkaClient(ctx context.Context, env envx.EnvX) (client *KafkaClient, er
 		case <-client.doneChan:
 			break
 		}
-		// close underlying client
-		client.underlying.Close()
+		// close underlying client if it was initialized
+		if client.underlying != nil {
+			client.underlying.Close()
+		}
 		// signal that wait is over and client is now closed
 		client.errs <- ErrClientClosed
 		close(client.doneWaitChan)
@@ -97,7 +107,7 @@ func (k *KafkaClient) RegisterConsumerFunc(
 		panic("cannot register consumer after client has been started")
 	}
 	return k.consumerRegistry.AddConsumer(
-		topic,
+		k.applySuffix(topic),
 		retries,
 		useDlq,
 		process,
@@ -114,7 +124,7 @@ func (k *KafkaClient) SetGroup(group string) {
 	if k.IsStarted() {
 		panic("cannot set consumer group after client has been started")
 	}
-	k.group = group
+	k.group = k.applySuffix(group)
 }
 
 // Set client retry topic which allows for consumers to replay failed records.
@@ -130,7 +140,7 @@ func (k *KafkaClient) SetRetryTopic(topic string) {
 	if k.retryTopic != "" {
 		panic("cannot set retry topic after it was already set")
 	}
-	k.retryTopic = topic
+	k.retryTopic = k.applySuffix(topic)
 }
 
 // Set client dlq topic which allows for consumers to replay failed records.
@@ -146,7 +156,7 @@ func (k *KafkaClient) SetDlqTopic(topic string) {
 	if k.dlqTopic != "" {
 		panic("cannot set dlq topic after it was already set")
 	}
-	k.dlqTopic = topic
+	k.dlqTopic = k.applySuffix(topic)
 }
 
 // Setup client connection to brokers. If any consumers are registered, start consuming immediately.
@@ -278,6 +288,7 @@ func (k *KafkaClient) PublishRecord(
 	topic string,
 	record *kgo.Record,
 ) (err error) {
+	record.Topic = k.applySuffix(record.Topic)
 	var wg sync.WaitGroup
 	wg.Add(1)
 	k.underlying.Produce(ctx, record, func(_ *kgo.Record, produceErr error) {
@@ -357,6 +368,14 @@ func getConsumerStartOffset(env envx.EnvX) (kgo.Offset, error) {
 	}
 	startOffset := kgo.NewOffset().AfterMilli(startFrom.UnixMilli())
 	return startOffset, nil
+}
+
+// applySuffix appends the global suffix to a name if the suffix is set.
+func (k *KafkaClient) applySuffix(name string) string {
+	if k.globalSuffix == "" {
+		return name
+	}
+	return name + k.globalSuffix
 }
 
 // Reset consumer status and start the poll, process, commit loop.

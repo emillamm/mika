@@ -637,6 +637,78 @@ func TestKafkaClient(t *testing.T) {
 		closeClientAndWait(ctx, t, client2)
 		closeClientAndWait(ctx, t, client3)
 	})
+
+	t.Run("global suffix is applied to group, topics, retry and dlq", func(t *testing.T) {
+		// Initialize values
+		suffix := "-test-suffix"
+		topic := "test-topic"
+		group := randomGroup()
+		env := func(s string) string {
+			switch s {
+			case "KAFKA_GLOBAL_SUFFIX":
+				return suffix
+			case "KAFKA_CONSUMER_START_FROM":
+				return time.Now().Format(time.RFC3339)
+			default:
+				return os.Getenv(s)
+			}
+		}
+
+		// Create client
+		ctx, _ := context.WithTimeout(context.Background(), 10*time.Second)
+		client, err := NewKafkaClient(ctx, env)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		// Create record handler
+		handler := NewRecordHandler()
+		handler.Handle(func(r *ConsumeRecord) error {
+			if v := string(r.Underlying.Value); v != "r1" {
+				return fmt.Errorf("unexpected value %v", v)
+			}
+			r.Ack()
+			return nil
+		})
+		ctx, _ = context.WithTimeout(ctx, 7*time.Second)
+		handler.Start(ctx)
+
+		// Configure client
+		client.SetGroup(group)
+		client.SetRetryTopic("test-retry")
+		client.SetDlqTopic("test-dlq")
+
+		// Register consumer
+		registerConsumerWithHandler(t, client, handler, topic, 0, false)
+
+		// Verify suffix was applied to all configurations
+		if client.group != group+suffix {
+			t.Errorf("expected group to be '%s%s', got '%s'", group, suffix, client.group)
+		}
+		if client.retryTopic != "test-retry"+suffix {
+			t.Errorf("expected retryTopic to be 'test-retry%s', got '%s'", suffix, client.retryTopic)
+		}
+		if client.dlqTopic != "test-dlq"+suffix {
+			t.Errorf("expected dlqTopic to be 'test-dlq%s', got '%s'", suffix, client.dlqTopic)
+		}
+
+		// Verify topic was registered with suffix
+		if _, err := client.consumerRegistry.GetConsumer(topic + suffix); err != nil {
+			t.Errorf("expected consumer for topic '%s' in registry: %v", topic+suffix, err)
+		}
+
+		// Start client
+		startClientAndHandleErrors(t, client)
+
+		// Publish record (suffix is applied automatically)
+		publishRecordWithValue(ctx, t, client, "r1", topic)
+
+		// Verify handler received the record
+		verifyHandlerError(t, handler)
+
+		// Close client
+		closeClientAndWait(ctx, t, client)
+	})
 }
 
 var ErrRecordFailed = fmt.Errorf("simulated record failure")
@@ -820,3 +892,4 @@ func randomGroup() string {
 	}
 	return fmt.Sprintf("test_%s", string(b))
 }
+
