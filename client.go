@@ -21,7 +21,7 @@ var ErrClientClosed = errors.New("KafkaClient is closed")
 var (
 	ErrConsumerTopicAlreadyExists      = consum.ErrConsumerTopicAlreadyExists
 	ErrConsumerTopicDoesntExist        = consum.ErrConsumerTopicDoesntExist
-	ErrDqlNotConfigured                = errors.New("This client was not configured to comsume from dlq")
+	ErrDqlNotConfigured                = errors.New("This client was not configured to consume from dlq")
 	ErrRetriedRecordWithoutConsumer    = errors.New("This client does not have a consumer for a record consumed from a retry/dlq topic. This should not happen.")
 	ErrRetriedRecordFromDifferentGroup = errors.New("This client group is different from the original client group that published to a retry/dlq topic")
 )
@@ -140,7 +140,7 @@ func (k *KafkaClient) SetGroup(group string) {
 // called, it will panic.
 func (k *KafkaClient) SetRetryTopic(topic string) {
 	if k.IsStarted() {
-		panic("cannot set consumer group after client has been started")
+		panic("cannot set retry topic after client has been started")
 	}
 	if k.retryTopic != "" {
 		panic("cannot set retry topic after it was already set")
@@ -156,7 +156,7 @@ func (k *KafkaClient) SetRetryTopic(topic string) {
 // called, it will panic.
 func (k *KafkaClient) SetDlqTopic(topic string) {
 	if k.IsStarted() {
-		panic("cannot set consumer group after client has been started")
+		panic("cannot set dlq topic after client has been started")
 	}
 	if k.dlqTopic != "" {
 		panic("cannot set dlq topic after it was already set")
@@ -284,7 +284,7 @@ func (k *KafkaClient) DisableDlqConsumption() error {
 }
 
 // Produce a record to the give topic.
-// If the provided context expures, the method will fail and return an error.
+// If the provided context expires, the method will fail and return an error.
 // If the client is closed, an error will also be returned.
 // If the client is currently terminating gracefully, publishing will be allowed
 // for as long as the underlying client is alive.
@@ -319,9 +319,9 @@ func (k *KafkaClient) Close() {
 	}
 }
 
-// Close client by stopping consumption gracefully if consoumer is actively consuming and
+// Close client by stopping consumption gracefully if consumer is actively consuming and
 // not terminating. Otherwise, this will close client normally.
-func (k *KafkaClient) CloseGracefylly(ctx context.Context) {
+func (k *KafkaClient) CloseGracefully(ctx context.Context) {
 	slog.Info("mika: initiating graceful shutdown")
 	go func() {
 		k.consumerStatus.TerminateGracefully(ctx)
@@ -574,9 +574,11 @@ func (k *KafkaClient) handleFailedRecord(record *kgo.Record, failureReason error
 		return fmt.Errorf("could not get consumer for topic %s: %w", failureState.OriginalTopic, err)
 	}
 
-	// publish to retry topic if one exists and there are retries left
+	// publish to retry topic if the error is retryable, retries are configured, and retries remain
+	var retryableErr *RetryableError
+	isRetryable := errors.As(failureReason, &retryableErr)
 	retriesEnabled := k.retryTopic != "" && consumer.Retries > 0
-	if retriesEnabled && consumer.Retries > failureState.Retries {
+	if isRetryable && retriesEnabled && consumer.Retries > failureState.Retries {
 		ctx, _ := context.WithTimeout(context.Background(), 5*time.Second) // TODO make configurable
 		failureState.IncrementRetries(headers, k.group)
 		retryRecord := *record
@@ -584,6 +586,13 @@ func (k *KafkaClient) handleFailedRecord(record *kgo.Record, failureReason error
 		if err := k.PublishRecord(ctx, k.retryTopic, &retryRecord); err != nil {
 			return fmt.Errorf("failed to publish record to retry topic: %w", err)
 		}
+		slog.Info("mika: published failed record to retry topic",
+			"originalTopic", failureState.OriginalTopic,
+			"retryTopic", k.retryTopic,
+			"retryCount", failureState.Retries,
+			"maxRetries", consumer.Retries,
+			"error", failureReason.Error(),
+		)
 		return nil
 	}
 	dlqEnabled := k.dlqTopic != "" && k.group != "" && consumer.UseDlq
@@ -594,7 +603,18 @@ func (k *KafkaClient) handleFailedRecord(record *kgo.Record, failureReason error
 		if err := k.PublishRecord(ctx, k.dlqTopic, &dlqRecord); err != nil {
 			return fmt.Errorf("failed to publish record to dlq topic: %w", err)
 		}
+		slog.Warn("mika: published failed record to dlq",
+			"originalTopic", failureState.OriginalTopic,
+			"dlqTopic", k.dlqTopic,
+			"retryCount", failureState.Retries,
+			"error", failureReason.Error(),
+		)
 		return nil
 	}
+	slog.Warn("mika: record failed with no dlq configured",
+		"topic", record.Topic,
+		"originalTopic", failureState.OriginalTopic,
+		"error", failureReason.Error(),
+	)
 	return fmt.Errorf("dlq not enabled for topic %s. Record failed with error: %s", record.Topic, failureReason)
 }
