@@ -719,7 +719,7 @@ func TestKafkaClient(t *testing.T) {
 			case "KAFKA_GLOBAL_SUFFIX":
 				return suffix
 			case "KAFKA_CONSUMER_START_FROM":
-				return time.Now().Format(time.RFC3339)
+				return time.Now().Format(time.RFC3339Nano)
 			default:
 				return os.Getenv(s)
 			}
@@ -866,7 +866,7 @@ func getEnv(s string) string {
 	switch s {
 	case "KAFKA_CONSUMER_START_FROM":
 		// Ensure that we start consuming from the right timestamp
-		return time.Now().Format(time.RFC3339)
+		return time.Now().Format(time.RFC3339Nano)
 	default:
 		return os.Getenv(s)
 	}
