@@ -120,6 +120,15 @@ func TestKafkaClient(t *testing.T) {
 				return nil
 			})
 		}
+		handleRecordFailRetryable := func(handler *RecordHandler, expectedValue string) {
+			handler.Handle(func(r *ConsumeRecord) error {
+				if v := string(r.Underlying.Value); v != expectedValue {
+					return fmt.Errorf("unexpected value %v", v)
+				}
+				r.Fail(NewRetryableError(ErrRecordFailed))
+				return nil
+			})
+		}
 		handleRecordFail := func(handler *RecordHandler, expectedValue string) {
 			handler.Handle(func(r *ConsumeRecord) error {
 				if v := string(r.Underlying.Value); v != expectedValue {
@@ -131,8 +140,8 @@ func TestKafkaClient(t *testing.T) {
 		}
 
 		handler1 := NewRecordHandler() // pass through retry topic two times, then ack
-		handleRecordFail(handler1, "r1")
-		handleRecordFail(handler1, "r1")
+		handleRecordFailRetryable(handler1, "r1")
+		handleRecordFailRetryable(handler1, "r1")
 		handleRecordAck(handler1, "r1")
 		handler1.Start(ctx)
 
@@ -142,9 +151,9 @@ func TestKafkaClient(t *testing.T) {
 		handler2.Start(ctx)
 
 		handler3 := NewRecordHandler() // pass through retry topic two times, then through dlq topic, then ack
-		handleRecordFail(handler3, "r3")
-		handleRecordFail(handler3, "r3")
-		handleRecordFail(handler3, "r3")
+		handleRecordFailRetryable(handler3, "r3")
+		handleRecordFailRetryable(handler3, "r3")
+		handleRecordFailRetryable(handler3, "r3")
 		handleRecordAck(handler3, "r3")
 		handler3.Start(ctx)
 
@@ -560,31 +569,31 @@ func TestKafkaClient(t *testing.T) {
 				return nil
 			})
 		}
-		handleRecordFail := func(handler *RecordHandler, expectedValue string) {
+		handleRecordFailRetryable := func(handler *RecordHandler, expectedValue string) {
 			handler.Handle(func(r *ConsumeRecord) error {
 				if v := string(r.Underlying.Value); v != expectedValue {
 					return fmt.Errorf("unexpected value %v", v)
 				}
-				r.Fail(ErrRecordFailed)
+				r.Fail(NewRetryableError(ErrRecordFailed))
 				return nil
 			})
 		}
 
 		handler1 := NewRecordHandler() // pass through retry topic two times, then ack
-		handleRecordFail(handler1, "r1")
-		handleRecordFail(handler1, "r1")
+		handleRecordFailRetryable(handler1, "r1")
+		handleRecordFailRetryable(handler1, "r1")
 		handleRecordAck(handler1, "r1")
 		handler1.Start(ctx)
 
 		handler2 := NewRecordHandler() // pass through retry topic two times, then ack
-		handleRecordFail(handler2, "r2")
-		handleRecordFail(handler2, "r2")
+		handleRecordFailRetryable(handler2, "r2")
+		handleRecordFailRetryable(handler2, "r2")
 		handleRecordAck(handler2, "r2")
 		handler2.Start(ctx)
 
 		handler3 := NewRecordHandler() // pass through retry topic two times, then ack
-		handleRecordFail(handler3, "r3")
-		handleRecordFail(handler3, "r3")
+		handleRecordFailRetryable(handler3, "r3")
+		handleRecordFailRetryable(handler3, "r3")
 		handleRecordAck(handler3, "r3")
 		handler3.Start(ctx)
 
@@ -636,6 +645,68 @@ func TestKafkaClient(t *testing.T) {
 		closeClientAndWait(ctx, t, client1)
 		closeClientAndWait(ctx, t, client2)
 		closeClientAndWait(ctx, t, client3)
+	})
+
+	t.Run("non-retryable error skips retry and goes to dlq", func(t *testing.T) {
+		// Initialize values
+		topic := "test-topic-non-retryable"
+		group := randomGroup()
+		env := getEnv
+
+		// Create client
+		ctx, _ := context.WithTimeout(context.Background(), 10*time.Second) // client timeout
+		client, err := NewKafkaClient(ctx, env)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		// Create record handler
+		ctx, _ = context.WithTimeout(ctx, 7*time.Second) // record handler timeout
+
+		handler := NewRecordHandler()
+		// First receive: fail with non-retryable error (should skip retry, go to DLQ)
+		handler.Handle(func(r *ConsumeRecord) error {
+			if v := string(r.Underlying.Value); v != "r1" {
+				return fmt.Errorf("unexpected value %v", v)
+			}
+			r.Fail(ErrRecordFailed) // non-retryable
+			return nil
+		})
+		// Second receive: ack from DLQ
+		handler.Handle(func(r *ConsumeRecord) error {
+			if v := string(r.Underlying.Value); v != "r1" {
+				return fmt.Errorf("unexpected value %v", v)
+			}
+			r.Ack()
+			return nil
+		})
+		handler.Start(ctx)
+
+		// Configure client with retries AND dlq
+		client.SetGroup(group)
+		client.SetRetryTopic("test-retry-topic")
+		client.SetDlqTopic("test-dlq-topic")
+
+		// Register consumer with retries enabled — but because the error is non-retryable,
+		// it should skip retries and go directly to DLQ
+		registerConsumerWithHandler(t, client, handler, topic, 2, true)
+
+		// start client
+		startClientAndHandleErrors(t, client)
+
+		// publish record
+		publishRecordWithValue(ctx, t, client, "r1", topic)
+
+		// Enable dlq consumption to receive the record from DLQ
+		if err = client.EnableDlqConsumption(); err != nil {
+			t.Fatal(err)
+		}
+
+		// Verify handler received record twice: once from topic, once from DLQ
+		verifyHandlerError(t, handler)
+
+		// Close client
+		closeClientAndWait(ctx, t, client)
 	})
 
 	t.Run("global suffix is applied to group, topics, retry and dlq", func(t *testing.T) {
@@ -867,7 +938,7 @@ func publishRecordWithValue(
 }
 
 func closeClientAndWait(ctx context.Context, t testing.TB, client *KafkaClient) {
-	client.CloseGracefylly(ctx)
+	client.CloseGracefully(ctx)
 	client.WaitForDone()
 	time.Sleep(10 * time.Millisecond) // allow ErrClientClosed to arrive
 	if !client.IsClosed() {

@@ -21,7 +21,7 @@ The client is created by calling `NewKafkaClient(ctx, env)` which takes a contex
 ```
 ctx := context.Background()
 env := os.Getenv
-client := mika.NewKafkaClient(ctx, env)
+client, err := mika.NewKafkaClient(ctx, env)
 ```
 
 The client can be configured with a consumer group, a retry and DLQ topic. These configurations are optional although a consumer group is required if either retries or DLQ are configured. In most cases you would want to attach a unique consumer group to the client.
@@ -63,6 +63,21 @@ func consumeMyTopic(record *mika.ConsumeRecord) {
     bytes := record.Underlying.Value
     if err := processBytes(bytes); err != nil {
         record.Fail(err)
+        return
+    }
+    record.Ack()
+}
+```
+
+By default, `Fail(err)` skips retries and sends the record directly to the DLQ (if configured). To opt in to retries, wrap the error in a `RetryableError`:
+
+```
+func consumeMyTopic(record *mika.ConsumeRecord) {
+    bytes := record.Underlying.Value
+    if err := processBytes(bytes); err != nil {
+        // Retryable errors will be published to the retry topic
+        record.Fail(mika.NewRetryableError(err))
+        return
     }
     record.Ack()
 }
@@ -72,10 +87,10 @@ Here is how Ack/Fail work under the hood.
 Under the hood, records are polled in batches by the client and delegated to the consumers based on the topic they came from. A batch is committed and a new poll is started once all records are *completed*. In this context, completed means either of the following
 
 * The record is "acked" by calling `record.Ack()`
-* The record is "failed" by calling `record.Fail(reason)` and the record has not exceeded the number of retries allowed by the consumer.
-* The record is "failed" by calling `record.Fail(reason)` and the consumer has enabled DLQ.
+* The record is "failed" by calling `record.Fail(mika.NewRetryableError(reason))` and the record has not exceeded the number of retries allowed by the consumer.
+* The record is "failed" by calling `record.Fail(reason)` (non-retryable) and the consumer has enabled DLQ.
 
-If a batch of records is never fully completed the poll loop will stall forever. It is important to note that *all* consumers on this client will stall, not just the offending consumer. To avoid this, it is recommended to use a DLQ or call "ack" failed records that are not worth reprocessing. 
+If a batch of records is never fully completed the poll loop will stall forever. It is important to note that *all* consumers on this client will stall, not just the offending consumer. To avoid this, it is recommended to use a DLQ or call "ack" failed records that are not worth reprocessing.
 
 ### Stop the client
 The client can be stopped gracefully which allows the current batch of polled records to be processed within a timeframe that can be controlled by a context.
