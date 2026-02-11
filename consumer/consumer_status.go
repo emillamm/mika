@@ -3,6 +3,7 @@ package consumer
 import (
 	"context"
 	"fmt"
+	"log/slog"
 )
 
 // A consumer can be in the following states
@@ -96,16 +97,20 @@ func (c *ConsumerStatus) Start() {
 // will be closed automatically.
 func (c *ConsumerStatus) TerminateGracefully(ctx context.Context) {
 	if !c.IsStarted() {
+		slog.Info("mika: consumer not started, terminating immediately")
 		c.Terminate()
 		return
 	}
+	slog.Info("mika: signaling consumer to stop accepting new fetches")
 	c.closeTermChan()
 	go func() {
 		select {
 		case <- ctx.Done():
 			c.err = fmt.Errorf("consumer did not finish processing records during graceful shutdown: %w", ctx.Err())
+			slog.Error("mika: graceful shutdown timed out", "error", c.err)
 			c.Terminate()
 		case <- c.DoneSig():
+			slog.Info("mika: consumer finished processing in-flight records")
 			break
 		}
 

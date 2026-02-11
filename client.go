@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -77,6 +78,7 @@ func NewKafkaClient(ctx context.Context, env envx.EnvX) (client *KafkaClient, er
 		// wait for context to be done or for client done channel to be closed
 		select {
 		case <-ctx.Done():
+			slog.Warn("mika: client context cancelled/expired, closing client")
 			client.errs <- fmt.Errorf("client context cancelled/expired: %w", ctx.Err())
 			client.Close()
 		case <-client.doneChan:
@@ -84,7 +86,10 @@ func NewKafkaClient(ctx context.Context, env envx.EnvX) (client *KafkaClient, er
 		}
 		// close underlying client if it was initialized
 		if client.underlying != nil {
+			slog.Info("mika: closing underlying kgo client")
+			start := time.Now()
 			client.underlying.Close()
+			slog.Info("mika: underlying kgo client closed", "duration", time.Since(start))
 		}
 		// signal that wait is over and client is now closed
 		client.errs <- ErrClientClosed
@@ -308,6 +313,7 @@ func (k *KafkaClient) Close() {
 	case <-k.doneChan:
 		return
 	default:
+		slog.Info("mika: closing client")
 		k.consumerStatus.Terminate()
 		close(k.doneChan)
 	}
@@ -316,13 +322,16 @@ func (k *KafkaClient) Close() {
 // Close client by stopping consumption gracefully if consoumer is actively consuming and
 // not terminating. Otherwise, this will close client normally.
 func (k *KafkaClient) CloseGracefylly(ctx context.Context) {
+	slog.Info("mika: initiating graceful shutdown")
 	go func() {
 		k.consumerStatus.TerminateGracefully(ctx)
 		select {
 		case <-k.doneChan:
+			slog.Info("mika: client already closed during graceful shutdown")
 			k.consumerStatus.Terminate()
 			return
 		case <-k.consumerStatus.DoneSig():
+			slog.Info("mika: consumer finished draining, closing client")
 			k.Close()
 		}
 	}()
